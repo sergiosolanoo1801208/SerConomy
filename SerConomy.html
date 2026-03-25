@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>FinApp COP - Inteligente</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    /* Tema Oscuro Permanente */
+    :root {
+      --primary: #0A1628;
+      --bg-main: #0f172a;
+      --card: #1e293b;
+      --text: #f9fafb;
+      --text-muted: #9ca3af;
+      --border: #334155;
+    }
+    
+    body {
+      font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg-main);
+      color: var(--text);
+      overscroll-behavior-y: contain;
+    }
+    .app-container { height: 100dvh; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+    .content-area { flex: 1; overflow-y: auto; padding-bottom: 80px; }
+    .nav-bottom { height: 65px; background-color: var(--card); border-top: 1px solid var(--border); }
+    
+    .bg-card { background-color: var(--card); border: 1px solid var(--border); }
+    .text-main { color: var(--text); }
+    .text-muted { color: var(--text-muted); }
+
+    .bubble { max-width: 85%; margin-bottom: 10px; padding: 12px 16px; border-radius: 18px; font-size: 0.95rem; line-height: 1.4; }
+    .bubble-user { align-self: flex-end; background: #3b82f6; color: white; border-bottom-right-radius: 4px; }
+    .bubble-ai { align-self: flex-start; background: var(--card); color: var(--text); border-bottom-left-radius: 4px; border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+
+    .overlay-view {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: var(--bg-main); z-index: 100;
+      display: none; flex-direction: column;
+    }
+    
+    .category-card, .goal-card, .budget-card {
+      background-color: var(--card); border: 1px solid var(--border);
+      border-radius: 1rem; padding: 1rem;
+      transition: transform 0.1s;
+    }
+    .category-card:active, .goal-card:active { transform: scale(0.96); }
+
+    .typing-dot { width: 6px; height: 6px; background: #9ca3af; border-radius: 50%; display: inline-block; animation: bounce 1.4s infinite ease-in-out both; }
+    @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+
+    input[type="date"], input[type="number"], input[type="text"], input[type="password"] { background: #0f172a; color: white; border: 1px solid #334155; color-scheme: dark; }
+
+    .progress-striped {
+      background-image: linear-gradient(45deg, rgba(255, 255, 255, 0.15) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.15) 75%, transparent 75%, transparent);
+      background-size: 1rem 1rem;
+    }
+    
+    .date-edit-input { background: transparent; border: none; color: inherit; font-weight: inherit; outline: none; padding: 0; font-family: inherit; width: 110px; text-align: center; cursor: pointer; }
+    .date-edit-input::-webkit-calendar-picker-indicator { filter: invert(1); opacity: 0.6; cursor: pointer; }
+
+    #settings-menu {
+      position: fixed; top: 0; right: -100%; width: 300px; height: 100%;
+      background: var(--card); border-left: 1px solid var(--border);
+      z-index: 1000; transition: right 0.3s ease; box-shadow: -5px 0 15px rgba(0,0,0,0.5);
+      overflow-y: auto;
+    }
+    #settings-menu.open { right: 0; }
+    #overlay-dark { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 999; display: none; }
+  </style>
+</head>
+<body>
+
+<div class="app-container">
+  
+  <div id="overlay-dark" onclick="toggleSettings()"></div>
+
+  <!-- MODAL CONFIRMACIÓN CUSTOM -->
+  <div id="custom-confirm" class="fixed inset-0 bg-black/70 z-[9999] hidden flex items-center justify-center p-4">
+    <div class="bg-card border border-slate-700 p-6 rounded-2xl max-w-sm w-full shadow-2xl scale-95 transition-transform duration-200" id="custom-confirm-box">
+      <h3 class="text-lg font-bold text-main mb-2">¿Estás seguro?</h3>
+      <p class="text-sm text-muted mb-6" id="custom-confirm-msg">Esta acción no se puede deshacer.</p>
+      <div class="flex gap-3 justify-end">
+        <button id="btn-confirm-cancel" class="px-4 py-2 rounded-xl text-sm font-bold bg-slate-800 text-muted">Cancelar</button>
+        <button id="btn-confirm-ok" class="px-4 py-2 rounded-xl text-sm font-bold bg-red-600 text-white shadow-lg shadow-red-900/50">Sí, continuar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL EDITAR CATEGORÍA -->
+  <div id="edit-cat-modal" class="fixed inset-0 bg-black/70 z-[9998] hidden flex items-center justify-center p-4">
+    <div class="bg-card border border-slate-700 p-6 rounded-2xl max-w-sm w-full shadow-2xl scale-95 transition-transform duration-200" id="edit-cat-box">
+      <h3 class="text-lg font-bold text-main mb-4">Mover a otra categoría</h3>
+      
+      <label class="text-xs text-muted block mb-2">Selecciona una existente</label>
+      <div class="relative mb-4">
+        <select id="edit-cat-select" class="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-white outline-none appearance-none">
+        </select>
+        <i class="fas fa-chevron-down absolute right-4 top-4 text-muted pointer-events-none"></i>
+      </div>
+
+      <label class="text-xs text-muted block mb-2">O crea una nueva</label>
+      <input type="text" id="edit-cat-input" placeholder="Ej: Viajes..." class="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-white outline-none mb-6">
+
+      <div class="flex gap-3 justify-end">
+        <button onclick="closeEditCategory()" class="px-4 py-2 rounded-xl text-sm font-bold bg-slate-800 text-muted">Cancelar</button>
+        <button onclick="saveEditCategory()" class="px-4 py-2 rounded-xl text-sm font-bold bg-blue-600 text-white shadow-lg shadow-blue-900/50">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <header class="bg-[#0A1628] text-white p-4 flex justify-between items-center shrink-0 z-10 shadow-md">
+    <h1 class="text-xl font-bold tracking-wide" id="view-title">Saldo</h1>
+    <button onclick="toggleSettings()" class="text-blue-400 p-2 hover:bg-white/10 rounded-full transition-colors">
+      <i class="fas fa-cog text-lg"></i>
+    </button>
+  </header>
+
+  <!-- MENÚ OPCIONES -->
+  <div id="settings-menu" class="flex flex-col">
+    <div class="p-5 border-b border-slate-700 flex justify-between items-center bg-[#0A1628] sticky top-0 z-10">
+      <h2 class="font-bold text-lg text-white"><i class="fas fa-shield-alt mr-2 text-blue-400"></i>Ajustes</h2>
+      <button onclick="toggleSettings()" class="text-slate-400 p-2"><i class="fas fa-times"></i></button>
+    </div>
+    
+    <div class="p-5 flex-1 space-y-6">
+      <!-- SECCIÓN: API KEY -->
+      <div class="space-y-3">
+        <h3 class="text-xs font-bold text-blue-400 uppercase tracking-wider">Inteligencia Artificial</h3>
+        <p class="text-[10px] text-muted leading-relaxed">Tu clave de Gemini API está configurada. Puedes cambiarla aquí si es necesario.</p>
+        <div class="relative">
+          <input type="password" id="api-key-input" placeholder="AIzaSy..." class="w-full p-3 rounded-xl bg-slate-900 border border-slate-700 text-white outline-none text-sm pr-10">
+          <button onclick="toggleApiKeyVisibility()" class="absolute right-3 top-3 text-muted hover:text-white transition-colors">
+            <i class="fas fa-eye" id="api-key-eye"></i>
+          </button>
+        </div>
+        <button onclick="saveApiKey()" class="w-full bg-blue-600 text-white font-bold py-2.5 rounded-xl text-sm active:scale-95 transition-transform shadow-md">
+          Guardar API Key
+        </button>
+      </div>
+
+      <hr class="border-slate-700">
+
+      <!-- SECCIÓN: RESPALDOS -->
+      <div class="space-y-3">
+        <h3 class="text-xs font-bold text-emerald-400 uppercase tracking-wider">Copias de Seguridad</h3>
+        <button onclick="exportData()" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl border border-slate-600 flex items-center justify-center gap-3 text-sm">
+          <i class="fas fa-download text-emerald-400"></i> Exportar Datos
+        </button>
+        <div class="relative">
+          <input type="file" id="import-file" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept=".json" onchange="importData(event)">
+          <button class="w-full bg-slate-800 text-white font-bold py-3 rounded-xl border border-slate-600 flex items-center justify-center gap-3 text-sm pointer-events-none">
+            <i class="fas fa-upload text-blue-400"></i> Importar Datos
+          </button>
+        </div>
+      </div>
+      
+      <hr class="border-slate-700">
+
+      <div class="pt-2">
+        <button onclick="resetData()" class="w-full bg-red-900/20 text-red-500 font-bold py-3 rounded-xl border border-red-900/50 hover:bg-red-900/40 text-sm">
+          <i class="fas fa-trash-alt mr-2"></i> Borrar toda mi cuenta
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <main class="content-area" id="main-content">
+    
+    <!-- VISTA SALDO -->
+    <section id="view-home" class="p-4 space-y-5">
+      <div class="bg-card rounded-2xl p-6 shadow-sm">
+        <p class="text-muted text-xs font-semibold uppercase tracking-wider">Saldo Disponible (COP)</p>
+        <h2 class="text-3xl font-black mt-1 text-main" id="total-balance">$ 0</h2>
+        <div class="flex gap-4 mt-5">
+          <div class="flex-1 bg-green-900/20 p-3 rounded-xl border border-green-800/50">
+            <p class="text-[10px] text-green-400 font-bold uppercase tracking-wider">Ingresos</p>
+            <p class="font-bold text-green-300" id="month-income">$ 0</p>
+          </div>
+          <div class="flex-1 bg-red-900/20 p-3 rounded-xl border border-red-800/50">
+            <p class="text-[10px] text-red-400 font-bold uppercase tracking-wider">Gastos</p>
+            <p class="font-bold text-red-300" id="month-expense">$ 0</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="space-y-3">
+        <h3 class="font-bold text-main">Tus Categorías</h3>
+        <div id="categories-grid" class="grid grid-cols-2 gap-3"></div>
+      </div>
+
+      <div class="bg-card p-4 rounded-2xl border shadow-sm mt-6">
+        <h3 class="font-bold text-sm text-main mb-4">Gastos del último mes</h3>
+        <div class="relative h-48 w-full">
+          <canvas id="expensesChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- VISTA PRESUPUESTO -->
+    <section id="view-budget" class="hidden p-4 space-y-4">
+      <div class="flex justify-between items-center">
+        <h3 class="font-bold text-main text-lg">Control de Gastos</h3>
+      </div>
+      <div class="flex bg-slate-800 rounded-xl p-1 border border-slate-700">
+        <button onclick="setBudgetPeriod('month')" id="btn-budget-month" class="flex-1 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white transition-colors">Mensual</button>
+        <button onclick="setBudgetPeriod('week')" id="btn-budget-week" class="flex-1 py-1.5 rounded-lg text-sm font-bold text-muted transition-colors">Semanal</button>
+      </div>
+      <p class="text-center text-xs text-blue-400 font-bold" id="budget-period-dates"></p>
+      <div id="budgets-list" class="space-y-3 mt-2"></div>
+    </section>
+
+    <!-- VISTA CHAT IA -->
+    <section id="view-chat" class="hidden h-full flex flex-col relative">
+      <div class="flex-1 overflow-y-auto p-4 flex flex-col" id="chat-messages">
+        <div class="bubble bubble-ai">
+          ¡Hola! Estoy conectada a toda tu app. Puedo registrar gastos, ingresos, crear metas o hacer presupuestos.
+        </div>
+      </div>
+      <div class="p-3 bg-card sticky bottom-0 z-10 border-t" style="border-color: var(--border);">
+        <div class="flex gap-2 items-center bg-slate-800 rounded-2xl px-3 py-1 border border-slate-700">
+          <input type="text" id="chat-input" placeholder="Escribe aquí..." class="flex-1 bg-transparent py-3 focus:outline-none text-sm text-main">
+          <button onclick="sendMessage()" class="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center shadow-md active:scale-95">
+            <i class="fas fa-paper-plane text-xs"></i>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- VISTA HISTORIAL -->
+    <section id="view-list" class="hidden p-4 flex flex-col h-full">
+      <div class="flex justify-between items-center shrink-0 mb-4">
+        <h3 class="font-bold text-main text-lg">Historial</h3>
+      </div>
+      <div class="flex bg-slate-800 rounded-xl p-1 border border-slate-700 shrink-0 mb-4">
+        <button onclick="setHistoryMode('movimientos')" id="btn-hist-mov" class="flex-1 py-1.5 rounded-lg text-sm font-bold bg-blue-600 text-white">Movimientos</button>
+        <button onclick="setHistoryMode('meses')" id="btn-hist-meses" class="flex-1 py-1.5 rounded-lg text-sm font-bold text-muted">Meses</button>
+      </div>
+      <div id="history-movimientos" class="flex-1 overflow-y-auto space-y-3 pb-6"></div>
+      <div id="history-meses" class="hidden flex-1 overflow-y-auto space-y-3 pb-6"></div>
+    </section>
+
+    <!-- VISTA METAS -->
+    <section id="view-goals" class="hidden p-4 space-y-4">
+      <div class="flex justify-between items-center">
+        <h3 class="font-bold text-main text-lg">Tus Planes de Ahorro</h3>
+      </div>
+      <div id="goals-list" class="space-y-3"></div>
+    </section>
+
+  </main>
+
+  <nav class="nav-bottom fixed bottom-0 left-0 right-0 flex justify-between items-center px-4 z-50">
+    <button onclick="changeTab('home')" class="tab-btn flex flex-col items-center gap-1 text-blue-400" data-tab="home"><i class="fas fa-wallet text-lg"></i><span class="text-[9px] font-bold">Saldo</span></button>
+    <button onclick="changeTab('budget')" class="tab-btn flex flex-col items-center gap-1 text-gray-400" data-tab="budget"><i class="fas fa-chart-line text-lg"></i><span class="text-[9px] font-bold">Presup.</span></button>
+    <button onclick="changeTab('chat')" class="tab-btn flex flex-col items-center gap-1 text-gray-400 relative" data-tab="chat">
+      <div class="bg-blue-600 text-white p-3.5 rounded-2xl -mt-8 shadow-lg border-2 border-slate-900"><i class="fas fa-robot text-xl"></i></div>
+      <span class="text-[9px] font-bold mt-1">Chat IA</span>
+    </button>
+    <button onclick="changeTab('goals')" class="tab-btn flex flex-col items-center gap-1 text-gray-400" data-tab="goals"><i class="fas fa-bullseye text-lg"></i><span class="text-[9px] font-bold">Metas</span></button>
+    <button onclick="changeTab('list')" class="tab-btn flex flex-col items-center gap-1 text-gray-400" data-tab="list"><i class="fas fa-list-ul text-lg"></i><span class="text-[9px] font-bold">Historial</span></button>
+  </nav>
+
+  <!-- OVERLAYS -->
+  <div id="month-detail-view" class="overlay-view">
+    <div class="bg-[#0A1628] text-white p-5 flex items-center gap-4 shrink-0 shadow-md">
+      <button onclick="closeMonthDetail()" class="p-2"><i class="fas fa-arrow-left"></i></button>
+      <h2 id="month-detail-title" class="text-lg font-bold capitalize">Resumen del Mes</h2>
+    </div>
+    <div class="flex-1 overflow-y-auto p-5 space-y-4 bg-main pb-20" id="month-detail-content"></div>
+  </div>
+
+  <div id="detail-view" class="overlay-view">
+    <div class="bg-[#0A1628] text-white p-5 flex items-center gap-4 shrink-0 shadow-md">
+      <button onclick="closeDetail()" class="p-2"><i class="fas fa-arrow-left"></i></button>
+      <h2 id="detail-category-title" class="text-lg font-bold uppercase tracking-wider">Categoría</h2>
+    </div>
+    <div class="p-4 flex gap-2 overflow-x-auto bg-card border-b shrink-0" style="border-color: var(--border);">
+      <button onclick="setFilter('day')" class="filter-btn px-4 py-1.5 rounded-full text-xs font-bold bg-slate-800 text-muted" id="f-day">Hoy</button>
+      <button onclick="setFilter('week')" class="filter-btn px-4 py-1.5 rounded-full text-xs font-bold bg-slate-800 text-muted" id="f-week">Semana</button>
+      <button onclick="setFilter('month')" class="filter-btn px-4 py-1.5 rounded-full text-xs font-bold bg-blue-600 text-white" id="f-month">Mes</button>
+    </div>
+    <div id="detail-list" class="flex-1 overflow-y-auto p-4 space-y-3 pb-20"></div>
+  </div>
+
+  <div id="goal-detail-view" class="overlay-view">
+    <div class="bg-[#0A1628] text-white p-5 flex items-center justify-between shrink-0 shadow-md">
+      <div class="flex items-center gap-4">
+        <button onclick="closeGoalDetail()" class="p-2"><i class="fas fa-arrow-left"></i></button>
+        <h2 class="text-lg font-bold">Progreso de Ahorro</h2>
+      </div>
+      <button type="button" onclick="deleteCurrentGoal()" class="text-red-400 hover:bg-white/10 p-2 rounded-full" title="Eliminar Meta"><i class="fas fa-trash"></i></button>
+    </div>
+    <div class="flex-1 overflow-y-auto p-5 space-y-5 bg-main pb-24">
+      <div class="bg-card p-6 rounded-2xl border text-center shadow-sm" style="border-color: var(--border);">
+        <h3 class="text-2xl font-black text-main" id="goal-detail-name">Meta</h3>
+        <div class="mt-4 mb-2 bg-slate-800 rounded-full h-5 w-full overflow-hidden relative border-2 border-white shadow-[0_0_8px_rgba(255,255,255,0.2)]">
+          <div id="goal-progress-bar" class="bg-blue-500 h-full rounded-full transition-all duration-500 progress-striped" style="width: 0%;"></div>
+        </div>
+        <div class="flex justify-between text-xs font-bold text-muted px-1 mt-1">
+          <span id="goal-saved-text">$0 ahorrado</span><span id="goal-target-text">Meta: $0</span>
+        </div>
+        <div class="mt-4 inline-flex items-center gap-2 bg-blue-900/30 text-blue-400 px-4 py-2 rounded-xl text-sm font-bold border border-blue-800">
+          <i class="far fa-calendar-alt"></i> Para el <input type="date" id="goal-edit-date" class="date-edit-input" onchange="updateGoalDate(this.value)"><i class="fas fa-pen text-[10px] ml-1 opacity-70"></i>
+        </div>
+      </div>
+      
+      <h4 class="font-bold text-main ml-1">¿Cuánto debes guardar?</h4>
+      <div class="space-y-3" id="saving-options-container">
+        <div id="card-period-day" onclick="toggleForm('day')" class="bg-card p-4 rounded-xl flex justify-between items-center border cursor-pointer hover:bg-slate-800 active:scale-95 transition-all" style="border-color: var(--border);"><p class="font-bold text-muted text-sm"><i class="fas fa-calendar-day w-5 text-blue-400"></i> Por Día</p><div class="text-right"><p class="font-black text-main" id="goal-daily-amount">$0</p><p class="text-[10px] text-blue-400 mt-1" id="sub-day">Toca para abonar <i class="fas fa-plus-circle"></i></p></div></div>
+        <div id="card-period-week" onclick="toggleForm('week')" class="bg-card p-4 rounded-xl flex justify-between items-center border cursor-pointer hover:bg-slate-800 active:scale-95 transition-all" style="border-color: var(--border);"><p class="font-bold text-muted text-sm"><i class="fas fa-calendar-week w-5 text-purple-400"></i> Por Semana</p><div class="text-right"><p class="font-black text-main" id="goal-weekly-amount">$0</p><p class="text-[10px] text-purple-400 mt-1" id="sub-week">Toca para abonar <i class="fas fa-plus-circle"></i></p></div></div>
+        <div id="card-period-month" onclick="toggleForm('month')" class="bg-card p-4 rounded-xl flex justify-between items-center border cursor-pointer hover:bg-slate-800 active:scale-95 transition-all" style="border-color: var(--border);"><p class="font-bold text-muted text-sm"><i class="fas fa-calendar-alt w-5 text-emerald-400"></i> Por Mes</p><div class="text-right"><p class="font-black text-main" id="goal-monthly-amount">$0</p><p class="text-[10px] text-emerald-400 mt-1" id="sub-month">Toca para abonar <i class="fas fa-plus-circle"></i></p></div></div>
+      </div>
+
+      <div id="contribution-form" class="hidden bg-slate-800 p-5 rounded-2xl border border-slate-700 shadow-lg space-y-4">
+        <div class="flex justify-between items-center border-b border-slate-700 pb-2">
+          <h5 class="font-bold text-sm text-white" id="form-period-title">Registrar Ahorro</h5>
+          <button onclick="document.getElementById('contribution-form').classList.add('hidden')" class="text-muted"><i class="fas fa-times"></i></button>
+        </div>
+        <div><label class="text-xs text-muted block mb-1">Fecha de abono</label><input type="date" id="contrib-date" class="w-full p-2 rounded-lg text-sm outline-none"></div>
+        <div class="flex gap-2">
+          <button onclick="setContribMode('justo')" id="btn-mode-justo" class="flex-1 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white transition-colors">Ahorro Justo</button>
+          <button onclick="setContribMode('libre')" id="btn-mode-libre" class="flex-1 py-2 rounded-lg text-xs font-bold bg-slate-700 text-muted transition-colors">Ahorro Libre</button>
+        </div>
+        <div><label class="text-xs text-muted block mb-1">Monto (COP)</label><input type="number" id="contrib-amount" class="w-full p-2 rounded-lg text-lg font-black outline-none bg-slate-900 border border-slate-700 text-white" readonly></div>
+        <button onclick="saveContribution()" class="w-full bg-green-600 text-white font-bold py-3 rounded-xl mt-2 active:scale-95 transition-transform shadow-lg shadow-green-900/50">Guardar Ahorro</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ESTADO GLOBAL
+  // Se insertó tu key como valor por defecto para que funcione inmediatamente en GitHub
+  let state = JSON.parse(localStorage.getItem('finapp_v16_state')) || { 
+    transactions: [], goals: [], budgets: [], userApiKey: "AIzaSyBk_YC2ZqJSSXHkoLL0LpA91dkm-1gmQfA" 
+  };
+  state.goals.forEach(g => { if(!g.contributions) g.contributions = []; if(g.lockedPeriod === undefined) g.lockedPeriod = null; });
+  if(!state.budgets) state.budgets = [];
+
+  let currentCategory = ""; let currentFilter = "month"; let currentGoalId = null;
+  let currentSuggestedAmount = 0; let activePeriodSelection = null; 
+  let currentBudgetPeriod = 'month'; let expensesChartInstance = null;
+  let currentHistoryMode = 'movimientos'; let editingTxId = null;
+
+  function save() { localStorage.setItem('finapp_v16_state', JSON.stringify(state)); updateUI(); }
+  function formatCOP(n) { return '$ ' + Math.round(n).toLocaleString('es-CO'); }
+
+  // MODAL CONFIRMACIÓN
+  let confirmCallback = null;
+  function showConfirm(msg, callback) {
+    document.getElementById('custom-confirm-msg').innerText = msg; confirmCallback = callback;
+    document.getElementById('custom-confirm').classList.remove('hidden');
+    setTimeout(() => document.getElementById('custom-confirm-box').classList.remove('scale-95'), 10);
+  }
+  function hideConfirm() {
+    document.getElementById('custom-confirm-box').classList.add('scale-95');
+    setTimeout(() => document.getElementById('custom-confirm').classList.add('hidden'), 200);
+  }
+  document.getElementById('btn-confirm-cancel').onclick = hideConfirm;
+  document.getElementById('btn-confirm-ok').onclick = () => { if(confirmCallback) confirmCallback(); hideConfirm(); };
+
+  // --- GESTIÓN DE API KEY ---
+  function toggleApiKeyVisibility() {
+    const input = document.getElementById('api-key-input');
+    const icon = document.getElementById('api-key-eye');
+    if (input.type === 'password') { input.type = 'text'; icon.classList.replace('fa-eye', 'fa-eye-slash'); } 
+    else { input.type = 'password'; icon.classList.replace('fa-eye-slash', 'fa-eye'); }
+  }
+  function saveApiKey() {
+    const key = document.getElementById('api-key-input').value.trim();
+    state.userApiKey = key; save(); alert("✅ Clave de IA guardada.");
+  }
+
+  // MODAL EDITAR CATEGORÍA
+  function openEditCategory(txId) {
+    editingTxId = txId; const tx = state.transactions.find(t => t.id === txId); if(!tx) return;
+    const cats = [...new Set(state.transactions.map(t => t.category))].filter(c => c !== 'Ahorros');
+    const select = document.getElementById('edit-cat-select');
+    select.innerHTML = '<option value="">-- Selecciona una existente --</option>' + cats.map(c => `<option value="${c}" ${c === tx.category ? 'selected' : ''}>${c}</option>`).join('');
+    document.getElementById('edit-cat-input').value = '';
+    document.getElementById('edit-cat-modal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('edit-cat-box').classList.remove('scale-95'), 10);
+  }
+  function closeEditCategory() {
+    document.getElementById('edit-cat-box').classList.add('scale-95');
+    setTimeout(() => document.getElementById('edit-cat-modal').classList.add('hidden'), 200);
+  }
+  function saveEditCategory() {
+    const selVal = document.getElementById('edit-cat-select').value; const inpVal = document.getElementById('edit-cat-input').value.trim();
+    const newCat = inpVal || selVal;
+    if(!newCat) return alert("Elige o escribe una categoría.");
+    const tx = state.transactions.find(t => t.id === editingTxId);
+    if(tx) { tx.category = newCat; save(); closeEditCategory(); if(document.getElementById('detail-view').style.display === 'flex') renderDetailList(); }
+  }
+
+  // MENÚ
+  function toggleSettings() {
+    const menu = document.getElementById('settings-menu'); const overlay = document.getElementById('overlay-dark');
+    if (menu.classList.contains('open')) { menu.classList.remove('open'); overlay.style.display = 'none'; } 
+    else { 
+      document.getElementById('api-key-input').value = state.userApiKey || "";
+      menu.classList.add('open'); overlay.style.display = 'block'; 
+    }
+  }
+  function exportData() {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state));
+    const dlAnchorElem = document.createElement('a'); dlAnchorElem.setAttribute("href", dataStr);
+    dlAnchorElem.setAttribute("download", `FinApp_Backup_${new Date().toISOString().split('T')[0]}.json`); dlAnchorElem.click(); toggleSettings();
+  }
+  function importData(event) {
+    const file = event.target.files[0];
+    if (file) {
+      const reader = new FileReader(); reader.onload = function(e) {
+        try { const loadedData = JSON.parse(e.target.result); if (loadedData.transactions && loadedData.goals) { state = loadedData; save(); alert("✅ Datos cargados"); toggleSettings(); } else { alert("❌ Archivo no válido."); } } catch (err) { alert("❌ Error."); }
+      }; reader.readAsText(file);
+    }
+  }
+  function resetData() { showConfirm("¿Borrar TODO tu historial, metas y presupuestos?", () => { state = { transactions: [], goals: [], budgets: [], userApiKey: state.userApiKey }; save(); toggleSettings(); }); }
+
+  // ELIMINAR TRANSACCIÓN (MAESTRO)
+  function deleteTransaction(txId) {
+    showConfirm("¿Eliminar este movimiento? Se actualizará tu saldo, presupuestos y metas.", () => {
+      state.transactions = state.transactions.filter(t => t.id !== txId);
+      state.goals.forEach(goal => {
+        const initLength = goal.contributions.length;
+        goal.contributions = goal.contributions.filter(c => c.txId !== txId);
+        if (initLength > 0 && goal.contributions.length === 0) goal.lockedPeriod = null;
+      });
+      save(); if (document.getElementById('detail-view').style.display === 'flex') renderDetailList();
+    });
+  }
+
+  // UI PRINCIPAL
+  function updateUI() {
+    const inc = state.transactions.filter(t => t.type === 'income').reduce((a, b) => a + b.amount, 0);
+    const exp = state.transactions.filter(t => t.type === 'expense').reduce((a, b) => a + b.amount, 0);
+    document.getElementById('total-balance').innerText = formatCOP(inc - exp);
+    document.getElementById('month-income').innerText = formatCOP(inc);
+    document.getElementById('month-expense').innerText = formatCOP(exp);
+    renderCategories(); renderHistory(); renderGoals(); renderBudgets();
+    if(currentHistoryMode === 'meses') renderMonths();
+    if(!document.getElementById('view-home').classList.contains('hidden')) renderChart();
+  }
+
+  // CATEGORÍAS
+  function renderCategories() {
+    const grid = document.getElementById('categories-grid'); const cats = {};
+    state.transactions.forEach(t => { if (!cats[t.category]) cats[t.category] = { count: 0 }; });
+    grid.innerHTML = Object.keys(cats).map(name => `
+      <div class="category-card relative group flex items-center justify-center p-5 active:bg-slate-800 cursor-pointer" onclick="openDetail('${name}')">
+        <button type="button" onclick="event.stopPropagation(); deleteCategory('${name}')" class="absolute top-2 right-2 text-slate-500 hover:text-red-400 p-1 rounded-lg transition-colors z-10" title="Eliminar Categoría">
+          <i class="fas fa-trash text-xs"></i>
+        </button>
+        <p class="text-sm text-main font-bold uppercase tracking-wider">${name}</p>
+      </div>`).join('') || '<p class="col-span-2 text-center text-muted py-6 text-sm">Aún no hay categorías.</p>';
+  }
+  function deleteCategory(name) { showConfirm(`¿Eliminar "${name}" y TODOS sus movimientos?`, () => { state.transactions = state.transactions.filter(t => t.category !== name); save(); }); }
+  function renderChart() {
+    const ctx = document.getElementById('expensesChart').getContext('2d');
+    const now = new Date(); const thirtyDaysAgo = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+    const expenses = state.transactions.filter(t => t.type === 'expense' && new Date(t.date) >= thirtyDaysAgo);
+    const dataMap = {}; expenses.forEach(t => { dataMap[t.category] = (dataMap[t.category] || 0) + t.amount; });
+    const labels = Object.keys(dataMap); const data = Object.values(dataMap);
+    if (expensesChartInstance) expensesChartInstance.destroy();
+    if(labels.length === 0) { labels.push("Sin datos"); data.push(0); }
+    expensesChartInstance = new Chart(ctx, { type: 'bar', data: { labels: labels, datasets: [{ data: data, backgroundColor: '#3b82f6', borderRadius: 6, maxBarThickness: 40 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#334155', drawBorder: false }, ticks: { color: '#9ca3af', callback: val => '$'+val/1000+'k' } }, x: { grid: { display: false }, ticks: { color: '#9ca3af', font: {size: 10} } } } } });
+  }
+
+  // --- HISTORIAL (MOVIMIENTOS / MESES) ---
+  function setHistoryMode(mode) {
+    currentHistoryMode = mode;
+    document.getElementById('btn-hist-mov').className = `flex-1 py-1.5 rounded-lg text-sm font-bold transition-colors ${mode==='movimientos'?'bg-blue-600 text-white':'bg-slate-800 text-muted'}`;
+    document.getElementById('btn-hist-meses').className = `flex-1 py-1.5 rounded-lg text-sm font-bold transition-colors ${mode==='meses'?'bg-blue-600 text-white':'bg-slate-800 text-muted'}`;
+    if (mode === 'movimientos') { document.getElementById('history-movimientos').classList.remove('hidden'); document.getElementById('history-meses').classList.add('hidden'); renderHistory(); } 
+    else { document.getElementById('history-movimientos').classList.add('hidden'); document.getElementById('history-meses').classList.remove('hidden'); renderMonths(); }
+  }
+
+  function renderHistory() {
+    const list = document.getElementById('history-movimientos');
+    list.innerHTML = state.transactions.slice().reverse().map(t => {
+      const isContrib = state.goals.some(g => g.contributions.some(c => c.txId === t.id));
+      const catBadge = isContrib 
+        ? `<span class="bg-slate-800 px-2 py-0.5 rounded text-muted">${t.category} <i class="fas fa-lock text-[8px] ml-1 opacity-50"></i></span>`
+        : `<span onclick="openEditCategory(${t.id})" class="bg-blue-900/30 border border-blue-800 px-2 py-0.5 rounded text-blue-400 cursor-pointer hover:bg-blue-900/50 active:scale-95 transition-transform" title="Cambiar categoría">${t.category} <i class="fas fa-pen text-[8px] ml-1"></i></span>`;
+
+      return `
+      <div class="bg-card p-4 rounded-xl shadow-sm flex justify-between items-center border border-slate-700 relative group">
+        <button onclick="deleteTransaction(${t.id})" class="absolute top-2 right-2 p-2 text-slate-500 hover:text-red-400 rounded-lg transition-colors z-10" title="Eliminar">
+          <i class="fas fa-trash text-xs"></i>
+        </button>
+        <div class="pr-8">
+          <p class="font-bold text-sm text-main">${t.description}</p>
+          <div class="text-[10px] uppercase mt-1 flex items-center gap-2">
+            ${catBadge} <span class="text-muted">• ${new Date(t.date).toLocaleDateString()}</span>
+          </div>
+        </div>
+        <p class="font-black ${t.type==='income'?'text-green-400':'text-red-400'}">${t.type==='income'?'+':'-'}${formatCOP(t.amount)}</p>
+      </div>`;
+    }).join('') || '<p class="text-center text-muted text-sm py-4">No hay movimientos.</p>';
+  }
+
+  function renderMonths() {
+    const list = document.getElementById('history-meses'); const monthsMap = new Set();
+    state.transactions.forEach(t => { const d = new Date(t.date); monthsMap.add(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2, '0')}`); });
+    const sortedMonths = Array.from(monthsMap).sort().reverse();
+    if(sortedMonths.length === 0) { list.innerHTML = '<p class="text-center text-muted text-sm py-4">No hay datos mensuales.</p>'; return; }
+    list.innerHTML = sortedMonths.map(mStr => {
+      const [yyyy, mm] = mStr.split('-'); const dateObj = new Date(yyyy, mm - 1, 1);
+      const mName = dateObj.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
+      return `<div onclick="openMonthDetail('${yyyy}', '${mm}')" class="bg-card p-5 rounded-xl shadow-sm border border-slate-700 cursor-pointer active:scale-95 transition-transform flex justify-between items-center"><p class="font-bold text-main capitalize">${mName}</p><i class="fas fa-chevron-right text-muted text-sm"></i></div>`;
+    }).join('');
+  }
+
+  function openMonthDetail(yyyy, mm) {
+    const year = parseInt(yyyy); const month = parseInt(mm) - 1; const dateObj = new Date(year, month, 1);
+    document.getElementById('month-detail-title').innerText = dateObj.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
+    const txs = state.transactions.filter(t => { const d = new Date(t.date); return d.getFullYear() === year && d.getMonth() === month; });
+    const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0); const expense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0); const net = income - expense;
+    const metasCumplidas = state.goals.filter(g => {
+      const saved = g.contributions.reduce((s, c) => s + c.amount, 0); if (saved < g.target_amount || g.contributions.length === 0) return false;
+      const lastDate = new Date(g.contributions[g.contributions.length - 1].date); return lastDate.getFullYear() === year && lastDate.getMonth() === month;
+    });
+    const budgetsList = state.budgets.filter(b => b.period === 'month'); let budgetsHtml = '';
+    if (budgetsList.length > 0) {
+      const statusHtml = budgetsList.map(b => {
+        const spent = txs.filter(t => t.type === 'expense' && t.category.toLowerCase() === b.category.toLowerCase()).reduce((s, t) => s + t.amount, 0);
+        const isMet = spent <= b.limit; return `<div class="flex justify-between items-center text-sm py-2 border-b border-slate-700 last:border-0"><span class="text-main">${b.category}</span><span class="${isMet ? 'text-green-400' : 'text-red-400'} font-bold">${isMet ? 'Dentro' : 'Excedido'}</span></div>`;
+      }).join('');
+      budgetsHtml = `<div class="bg-card p-4 rounded-xl border border-slate-700 mt-4"><h4 class="font-bold text-main mb-3"><i class="fas fa-chart-line text-blue-400 mr-2"></i>Presupuestos</h4>${statusHtml}</div>`;
+    }
+    let metasHtml = ''; if (metasCumplidas.length > 0) metasHtml = `<div class="bg-card p-4 rounded-xl border border-slate-700 mt-4"><h4 class="font-bold text-main mb-3"><i class="fas fa-trophy text-yellow-500 mr-2"></i>Metas Logradas 🎉</h4>` + metasCumplidas.map(g => `<div class="text-sm py-2 border-b border-slate-700 last:border-0 flex justify-between"><span class="text-main">${g.name}</span> <span class="text-blue-400 font-bold">${formatCOP(g.target_amount)}</span></div>`).join('') + `</div>`;
+    
+    document.getElementById('month-detail-content').innerHTML = `
+      <div class="grid grid-cols-2 gap-3"><div class="bg-green-900/20 p-4 rounded-xl border border-green-800/50"><p class="text-[10px] text-green-400 font-bold uppercase mb-1">Ingresos</p><p class="font-black text-green-300 text-lg">${formatCOP(income)}</p></div><div class="bg-red-900/20 p-4 rounded-xl border border-red-800/50"><p class="text-[10px] text-red-400 font-bold uppercase mb-1">Gastos</p><p class="font-black text-red-300 text-lg">${formatCOP(expense)}</p></div></div>
+      <div class="bg-card p-5 rounded-xl border border-slate-700 flex justify-between items-center mt-4"><p class="font-bold text-muted">Dinero Sobrante</p><p class="font-black text-xl ${net >= 0 ? 'text-blue-400' : 'text-red-400'}">${net >= 0 ? '+' : ''}${formatCOP(net)}</p></div>
+      ${budgetsHtml} ${metasHtml}
+    `;
+    document.getElementById('month-detail-view').style.display = 'flex';
+  }
+  function closeMonthDetail() { document.getElementById('month-detail-view').style.display = 'none'; }
+
+  // --- PRESUPUESTOS ---
+  function setBudgetPeriod(p) {
+    currentBudgetPeriod = p; document.getElementById('btn-budget-month').className = `flex-1 py-1.5 rounded-lg text-sm font-bold transition-colors ${p==='month'?'bg-blue-600 text-white':'bg-slate-800 text-muted'}`; document.getElementById('btn-budget-week').className = `flex-1 py-1.5 rounded-lg text-sm font-bold transition-colors ${p==='week'?'bg-blue-600 text-white':'bg-slate-800 text-muted'}`; renderBudgets();
+  }
+  function renderBudgets() {
+    const list = document.getElementById('budgets-list'); const dateLabel = document.getElementById('budget-period-dates');
+    const filtered = state.budgets.filter(b => b.period === currentBudgetPeriod);
+    const now = new Date(); const formatter = new Intl.DateTimeFormat('es-CO', { day: 'numeric', month: 'short' });
+    if (currentBudgetPeriod === 'month') { const firstDay = new Date(now.getFullYear(), now.getMonth(), 1); const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0); dateLabel.innerHTML = `<i class="far fa-calendar-alt"></i> Evaluando: ${formatter.format(firstDay)} - ${formatter.format(lastDay)}`; } 
+    else { const dayOfWeek = now.getDay() || 7; const firstDay = new Date(now); firstDay.setDate(now.getDate() - dayOfWeek + 1); const lastDay = new Date(firstDay); lastDay.setDate(firstDay.getDate() + 6); dateLabel.innerHTML = `<i class="far fa-calendar-alt"></i> Evaluando: ${formatter.format(firstDay)} - ${formatter.format(lastDay)}`; }
+    if (filtered.length === 0) { list.innerHTML = `<p class="text-center text-muted text-sm py-8">No tienes presupuestos en este periodo.</p>`; return; }
+    list.innerHTML = filtered.map(b => {
+      const spent = state.transactions.filter(t => { if (t.type !== 'expense' || t.category.toLowerCase() !== b.category.toLowerCase()) return false; const d = new Date(t.date); if (currentBudgetPeriod === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); else return (now - d) < 7 * 24 * 60 * 60 * 1000; }).reduce((sum, t) => sum + t.amount, 0);
+      const percent = Math.min(100, (spent / b.limit) * 100); let barColor = 'bg-green-500'; let textColor = 'text-green-400'; let icon = '';
+      if (percent >= 100) { barColor = 'bg-red-500'; textColor = 'text-red-400'; icon = '<i class="fas fa-exclamation-triangle text-red-500"></i> Límite superado'; } else if (percent >= 85) { barColor = 'bg-red-500'; textColor = 'text-red-400'; icon = '<i class="fas fa-exclamation-circle text-red-400"></i> Crítico'; } else if (percent >= 50) { barColor = 'bg-yellow-500'; textColor = 'text-yellow-400'; icon = 'Precaución'; }
+      return `<div class="budget-card relative group"><button type="button" onclick="event.stopPropagation(); deleteBudget(${b.id})" class="absolute top-2 right-2 p-2 text-slate-500 hover:text-red-400 hover:bg-red-900/20 rounded-lg transition-colors z-10"><i class="fas fa-trash"></i></button><div class="flex justify-between items-center mb-2 pr-8"><h4 class="font-bold text-sm text-main uppercase">${b.category}</h4><p class="font-black ${textColor}">${formatCOP(spent)} <span class="text-xs text-muted font-normal">/ ${formatCOP(b.limit)}</span></p></div><div class="bg-slate-800 rounded-full h-2 w-full overflow-hidden border border-slate-700"><div class="${barColor} h-full rounded-full transition-all duration-500" style="width: ${percent}%"></div></div>${icon ? `<p class="text-[10px] mt-2 ${textColor}">${icon}</p>` : ''}</div>`;
+    }).join('');
+  }
+  function deleteBudget(id) { showConfirm("¿Eliminar este presupuesto?", () => { state.budgets = state.budgets.filter(b => b.id !== id); save(); }); }
+
+  // --- DETALLES DE CATEGORÍA ---
+  function openDetail(cat) { currentCategory = cat; document.getElementById('detail-category-title').innerText = cat; document.getElementById('detail-view').style.display = 'flex'; renderDetailList(); }
+  function closeDetail() { document.getElementById('detail-view').style.display = 'none'; }
+  function setFilter(f) { currentFilter = f; ['day', 'week', 'month'].forEach(id => { document.getElementById('f-'+id).className = `filter-btn px-4 py-1.5 rounded-full text-xs font-bold ${id===f ? 'bg-blue-600 text-white' : 'bg-slate-800 text-muted'}`; }); renderDetailList(); }
+  function renderDetailList() {
+    const list = document.getElementById('detail-list'); const now = new Date();
+    const filtered = state.transactions.filter(t => {
+      if(t.category !== currentCategory) return false; const d = new Date(t.date);
+      if(currentFilter === 'day') return d.toDateString() === now.toDateString(); if(currentFilter === 'week') return (now - d) < 7 * 24 * 60 * 60 * 1000; if(currentFilter === 'month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); return true;
+    });
+    list.innerHTML = filtered.reverse().map(t => {
+      const isContrib = state.goals.some(g => g.contributions.some(c => c.txId === t.id));
+      const catBadge = isContrib ? `<span class="bg-slate-800 px-2 py-0.5 rounded text-muted">${t.category} <i class="fas fa-lock text-[8px] ml-1 opacity-50"></i></span>` : `<span onclick="openEditCategory(${t.id})" class="bg-blue-900/30 border border-blue-800 px-2 py-0.5 rounded text-blue-400 cursor-pointer hover:bg-blue-900/50 active:scale-95 transition-transform" title="Cambiar categoría">${t.category} <i class="fas fa-pen text-[8px] ml-1"></i></span>`;
+      return `
+      <div class="bg-card p-4 rounded-xl flex justify-between items-center shadow-sm border border-slate-700 relative group">
+        <button onclick="deleteTransaction(${t.id})" class="absolute top-2 right-2 p-2 text-slate-500 hover:text-red-400 rounded-lg transition-colors z-10"><i class="fas fa-trash text-xs"></i></button>
+        <div class="pr-8">
+          <p class="text-sm font-bold text-main">${t.description}</p>
+          <div class="text-[10px] uppercase mt-1 flex items-center gap-2">${catBadge} <span class="text-muted">• ${new Date(t.date).toLocaleDateString()}</span></div>
+        </div>
+        <p class="font-black ${t.type==='income'?'text-green-400':'text-red-400'}">${formatCOP(t.amount)}</p>
+      </div>`;
+    }).join('') || '<p class="text-center text-muted py-6 text-sm">Nada en este periodo.</p>';
+  }
+
+  // --- METAS (GOALS) ---
+  function renderGoals() {
+    let activeHtml = ''; let completedHtml = '';
+    state.goals.forEach(g => {
+      const saved = g.contributions.reduce((acc, curr) => acc + curr.amount, 0); const percent = Math.min(100, (saved / g.target_amount) * 100); const isCompleted = saved >= g.target_amount;
+      const cardHtml = `<div onclick="openGoalDetail(${g.id})" class="goal-card cursor-pointer border ${isCompleted ? 'opacity-80 border-green-800 bg-green-900/10' : ''}" style="border-color: ${isCompleted?'':'var(--border)'};"><div class="flex justify-between items-center mb-3"><h4 class="font-bold text-main">${g.name} ${isCompleted ? '🎉' : ''}</h4><p class="font-black ${isCompleted ? 'text-green-400' : 'text-blue-400'}">${formatCOP(g.target_amount)}</p></div><div class="bg-slate-800 rounded-full h-2 w-full overflow-hidden border border-white/20"><div class="${isCompleted ? 'bg-green-500' : 'bg-blue-500'} h-full rounded-full" style="width: ${percent}%"></div></div></div>`;
+      if(isCompleted) completedHtml += cardHtml; else activeHtml += cardHtml;
+    });
+    let finalRender = activeHtml || '<p class="text-center text-muted py-6 text-sm">Sin metas activas.</p>';
+    if (completedHtml) { finalRender += `<h3 class="font-bold text-main text-sm mt-8 mb-3"><i class="fas fa-check-circle text-green-500 mr-2"></i>Metas Finalizadas</h3>` + completedHtml; }
+    document.getElementById('goals-list').innerHTML = finalRender;
+  }
+
+  function openGoalDetail(id) {
+    currentGoalId = id; const goal = state.goals.find(g => g.id === id); if(!goal) return;
+    const totalSaved = goal.contributions.reduce((acc, curr) => acc + curr.amount, 0); const remaining = Math.max(0, goal.target_amount - totalSaved); const percent = Math.min(100, (totalSaved / goal.target_amount) * 100);
+    document.getElementById('goal-detail-name').innerText = goal.name; document.getElementById('goal-target-text').innerText = `Meta: ${formatCOP(goal.target_amount)}`; document.getElementById('goal-saved-text').innerText = `${formatCOP(totalSaved)} ahorrado`; document.getElementById('goal-progress-bar').style.width = `${percent}%`;
+    const dateOnly = new Date(goal.target_date).toISOString().split('T')[0]; document.getElementById('goal-edit-date').value = dateOnly;
+
+    const today = new Date(); today.setHours(0,0,0,0); const target = new Date(goal.target_date);
+    let diffDays = Math.max(1, Math.ceil((target - today) / (1000 * 60 * 60 * 24))); const dAmount = remaining / diffDays; const wAmount = remaining / Math.max(1, diffDays / 7); const mAmount = remaining / Math.max(1, diffDays / 30);
+    document.getElementById('goal-daily-amount').innerText = formatCOP(dAmount); document.getElementById('goal-weekly-amount').innerText = formatCOP(wAmount); document.getElementById('goal-monthly-amount').innerText = formatCOP(mAmount);
+    window.suggestedAmounts = { 'day': dAmount, 'week': wAmount, 'month': mAmount };
+
+    const lock = goal.lockedPeriod; 
+    ['day', 'week', 'month'].forEach(p => {
+      const card = document.getElementById(`card-period-${p}`); const sub = document.getElementById(`sub-${p}`);
+      if (lock && lock !== p && remaining > 0) { card.classList.add('opacity-30', 'pointer-events-none'); sub.innerText = "Bloqueado"; sub.className = "text-[10px] text-muted mt-1"; } 
+      else { card.classList.remove('opacity-30', 'pointer-events-none'); sub.innerHTML = 'Toca para abonar <i class="fas fa-plus-circle"></i>'; sub.className = `text-[10px] mt-1 ${p==='day'?'text-blue-400':p==='week'?'text-purple-400':'text-emerald-400'}`; }
+    });
+
+    if (remaining === 0) {
+      document.getElementById('goal-progress-bar').classList.replace('bg-blue-500', 'bg-green-500'); ['day','week','month'].forEach(p => document.getElementById(`card-period-${p}`).classList.add('opacity-50', 'pointer-events-none')); document.getElementById('goal-daily-amount').innerText = "Cumplida 🎉";
+    } else { document.getElementById('goal-progress-bar').classList.replace('bg-green-500', 'bg-blue-500'); }
+
+    document.getElementById('contribution-form').classList.add('hidden'); document.getElementById('goal-detail-view').style.display = 'flex';
+  }
+  function closeGoalDetail() { document.getElementById('goal-detail-view').style.display = 'none'; }
+  function updateGoalDate(newDate) { const goal = state.goals.find(g => g.id === currentGoalId); if(goal && newDate) { goal.target_date = new Date(newDate + 'T12:00:00').toISOString(); save(); openGoalDetail(currentGoalId); } }
+  function deleteCurrentGoal() { showConfirm('¿Eliminar esta meta? El progreso se perderá.', () => { state.goals = state.goals.filter(g => g.id !== currentGoalId); save(); closeGoalDetail(); }); }
+
+  function toggleForm(period) {
+    activePeriodSelection = period; currentSuggestedAmount = window.suggestedAmounts[period];
+    document.getElementById('form-period-title').innerText = {'day':'Ahorro Diario','week':'Ahorro Semanal','month':'Ahorro Mensual'}[period];
+    document.getElementById('contrib-date').value = new Date().toISOString().split('T')[0];
+    document.getElementById('contribution-form').classList.remove('hidden'); setContribMode('justo'); 
+    setTimeout(() => document.getElementById('contribution-form').scrollIntoView({behavior: "smooth", block: "end"}), 50);
+  }
+  function setContribMode(mode) {
+    const input = document.getElementById('contrib-amount'); const bJusto = document.getElementById('btn-mode-justo'); const bLibre = document.getElementById('btn-mode-libre');
+    if (mode === 'justo') { bJusto.className = "flex-1 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white transition-colors"; bLibre.className = "flex-1 py-2 rounded-lg text-xs font-bold bg-slate-700 text-muted transition-colors"; input.value = Math.round(currentSuggestedAmount); input.readOnly = true; input.classList.add('opacity-80'); } 
+    else { bLibre.className = "flex-1 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white transition-colors"; bJusto.className = "flex-1 py-2 rounded-lg text-xs font-bold bg-slate-700 text-muted transition-colors"; input.value = ''; input.readOnly = false; input.classList.remove('opacity-80'); input.focus(); }
+  }
+  function saveContribution() {
+    const amount = parseFloat(document.getElementById('contrib-amount').value); const dateInput = document.getElementById('contrib-date').value;
+    if (!amount || amount <= 0 || !dateInput) return;
+    const localDateISO = new Date(dateInput + 'T12:00:00').toISOString(); const goal = state.goals.find(g => g.id === currentGoalId);
+    if(goal) {
+      if(!goal.lockedPeriod) goal.lockedPeriod = activePeriodSelection;
+      const txId = Date.now();
+      goal.contributions.push({ date: localDateISO, amount: amount, period: activePeriodSelection, txId: txId });
+      state.transactions.push({ id: txId, amount: amount, description: `Abono: ${goal.name}`, type: 'expense', category: 'Ahorros', date: localDateISO });
+      save(); openGoalDetail(currentGoalId); 
+    }
+  }
+
+  // --- CEREBRO IA (CON MODELOS GARANTIZADOS) ---
+  async function sendMessage() {
+    const input = document.getElementById('chat-input'); const msg = input.value.trim(); if(!msg) return;
+    
+    if (!state.userApiKey) {
+      addMsg(msg, 'user'); input.value = '';
+      setTimeout(() => { addMsg("⚠️ Por favor, configura tu API Key en los Ajustes (icono ⚙️).", 'ai'); }, 500);
+      return;
+    }
+
+    addMsg(msg, 'user'); input.value = '';
+    const typing = document.createElement('div'); typing.className = 'bubble bubble-ai flex gap-1 items-center'; 
+    typing.innerHTML = '<div class="typing-dot"></div><div class="typing-dot" style="animation-delay:0.2s"></div><div class="typing-dot" style="animation-delay:0.4s"></div>'; 
+    document.getElementById('chat-messages').appendChild(typing); document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
+
+    try {
+      const todayStr = new Date().toISOString().split('T')[0]; 
+      const catList = [...new Set(state.transactions.map(t => t.category))].filter(c => c !== 'Ahorros').join(', ');
+      
+      const system = `Eres FinApp IA (Colombia/COP). Hoy: ${todayStr}.
+      Acciones JSON (SOLO JSON VÁLIDO SIN MARKDOWN):
+      1. Transacción -> {"action":"add_transaction", "amount": num, "description": "str", "type": "income"|"expense", "category": "str", "response": "OK"}
+      2. Meta -> {"action":"create_goal", "name": "Motivo", "target_amount": num, "target_date": "YYYY-MM-DD", "response": "OK"}
+      3. Presupuesto -> {"action":"add_budget", "category": "str", "limit": num, "period": "month"|"week", "response": "OK"}
+      4. Duda -> {"action":"ask", "response": "?"}`;
+
+      const payload = { 
+        contents: [{parts:[{text:msg}]}], 
+        systemInstruction: {parts:[{text:system}]}, 
+        generationConfig: {responseMimeType:"application/json"} 
+      };
+      
+      const modelsToTry = [
+        "gemini-1.5-flash-latest", 
+        "gemini-2.5-flash",
+        "gemini-2.0-flash", 
+        "gemini-1.5-pro-latest"
+      ];
+      
+      let res = null; 
+      let errorData = null;
+
+      for (const model of modelsToTry) {
+        try {
+          res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${state.userApiKey}`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+          });
+          if (res.ok) break; 
+          errorData = await res.json();
+        } catch (e) { console.warn(`Falló ${model}`); }
+      }
+      
+      if (!res || !res.ok) {
+        if(errorData?.error?.message.includes("API key not valid")) throw new Error("Clave API incorrecta. Revísala en Ajustes.");
+        throw new Error(errorData?.error?.message || "Servidores de Google no disponibles.");
+      }
+
+      const data = await res.json();
+      if(!data.candidates || data.candidates.length === 0) throw new Error("Respuesta bloqueada.");
+
+      const r = JSON.parse(data.candidates[0].content.parts[0].text.replace(/```json|```/g, '').trim()); 
+      typing.remove();
+      const nowISO = new Date().toISOString();
+
+      if(r.action === 'add_transaction') { state.transactions.push({ id: Date.now(), amount: r.amount, description: r.description, type: r.type, category: r.category, date: nowISO }); } 
+      else if (r.action === 'create_goal') { state.goals.push({ id: Date.now(), name: r.name, target_amount: r.target_amount, target_date: new Date(r.target_date+'T12:00:00').toISOString(), created_at: nowISO, contributions: [], lockedPeriod: null }); } 
+      else if (r.action === 'add_budget') { state.budgets.push({ id: Date.now(), category: r.category, limit: r.limit, period: r.period }); }
+      
+      save(); 
+      addMsg(r.response, 'ai');
+      
+    } catch(e) { 
+      typing.remove(); 
+      addMsg("❌ " + e.message, 'ai'); 
+    }
+  }
+
+  function addMsg(t, role) { const d = document.createElement('div'); d.className = `bubble bubble-${role}`; d.innerText = t; const container = document.getElementById('chat-messages'); container.appendChild(d); container.scrollTop = container.scrollHeight; }
+
+  // --- NAVEGACIÓN ---
+  function changeTab(tab) {
+    ['home', 'budget', 'chat', 'list', 'goals'].forEach(v => document.getElementById(`view-${v}`).classList.add('hidden'));
+    document.getElementById(`view-${tab}`).classList.remove('hidden'); document.getElementById('view-title').innerText = {'home':'Saldo', 'budget':'Presupuesto', 'chat':'Asistente IA', 'list':'Historial', 'goals':'Tus Metas'}[tab];
+    document.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('text-blue-400'); b.classList.add('text-gray-400'); });
+    document.querySelector(`[data-tab="${tab}"]`).classList.replace('text-gray-400', 'text-blue-400');
+    if(tab === 'home') renderChart(); if(tab === 'budget') renderBudgets();
+  }
+
+  document.getElementById('chat-input').addEventListener('keypress', (e) => { if(e.key === 'Enter') sendMessage(); });
+  window.onload = () => { updateUI(); }
+</script>
+
+</body>
+</html>
